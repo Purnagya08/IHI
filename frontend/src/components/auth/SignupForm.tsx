@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SignupRoleTabs, type SignupRole } from "./SignupRoleTabs";
 import { getCleanAuthErrorMessage } from "@/lib/auth/errors";
-import { getPostLoginRedirectUrl } from "@/lib/auth/roles";
 import { setAuthSession } from "@/lib/auth";
 
 export function SignupForm() {
@@ -64,8 +63,11 @@ export function SignupForm() {
         data.token
       );
 
-      const dest = await getPostLoginRedirectUrl(data.user?.role || role);
-      router.push(dest);
+      if ((data.user?.role || role) === "participant") {
+        router.push("/hackathons");
+      } else {
+        router.push("/dashboard");
+      }
       router.refresh();
       
     } catch (err) {

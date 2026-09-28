@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+﻿import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
 const COOKIE_NAME = process.env.AUTH_COOKIE_NAME || "ihi_session";
@@ -41,28 +41,12 @@ function isPublic(pathname: string): boolean {
   ) {
     return true;
   }
-  if (
-    /^\/events\/[^/]+$/.test(pathname) ||
-    /^\/events\/[^/]+\/register$/.test(pathname)
-  ) {
-    return true;
-  }
   return false;
 }
 
 function isOrganizerRoute(pathname: string): boolean {
-  return (
-    pathname.startsWith("/dashboard") ||
-    pathname.includes("/dashboard") ||
-    (pathname.startsWith("/events/") && pathname.includes("/judging")) ||
-    (pathname.startsWith("/events/") && pathname.includes("/registrations")) ||
-    (pathname.startsWith("/events/") && pathname.includes("/teams")) ||
-    (pathname.startsWith("/events/") && pathname.includes("/submissions")) ||
-    (pathname.startsWith("/events/") && pathname.includes("/results")) ||
-    (pathname.startsWith("/events/") && pathname.includes("/audit-log"))
-  );
+  return pathname.startsWith("/dashboard") || pathname.includes("/dashboard");
 }
-
 function isParticipantRoute(pathname: string): boolean {
   return (
     pathname.startsWith("/team") ||
@@ -160,6 +144,12 @@ export async function middleware(req: NextRequest) {
     return loginRedirect(req, "SESSION_MISSING");
   }
 
+  if (pathname.startsWith("/events")) {
+    if (claims.role !== "organizer" && claims.role !== "participant") {
+      return forbiddenRedirect(req);
+    }
+    return NextResponse.next();
+  }
   if (isOrganizerRoute(pathname)) {
     if (claims.role !== "organizer") {
       return forbiddenRedirect(req);
