@@ -2,13 +2,12 @@
 
 import { useState, useMemo, FormEvent } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { SignupRoleTabs, type SignupRole } from "./SignupRoleTabs";
 import { getCleanAuthErrorMessage } from "@/lib/auth/errors";
 import { setAuthSession } from "@/lib/auth";
 
 export function SignupForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   // If someone tries to pass ?role=judge, force them to participant.
@@ -30,6 +29,12 @@ export function SignupForm() {
       ? "Setup your organizer profile to start hosting." 
       : "Join the community to build and compete.";
   }, [role]);
+
+  // Determine redirect URL for the "Sign in" link
+  const redirectParam = searchParams.get("redirect") || searchParams.get("next");
+  const loginUrl = redirectParam 
+    ? `/login?role=${role}&redirect=${encodeURIComponent(redirectParam)}` 
+    : `/login?role=${role}`;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -57,23 +62,30 @@ export function SignupForm() {
         {
           name: data.user?.name || name.trim(),
           email: data.user?.email || email.trim(),
-          eventName: data.user?.eventName || "Stanford TreeHacks 2025",
+          eventName: data.user?.eventName || "IHI Console",
           role: data.user?.role || role,
         },
         data.token
       );
 
-      if ((data.user?.role || role) === "participant") {
-        router.push("/hackathons");
-      } else {
-        router.push("/dashboard");
+      // --- HARD REDIRECT TO BYPASS CACHE ---
+      const nextUrl = searchParams.get("redirect") || searchParams.get("next");
+      
+      if (role === "organizer") {
+        window.location.replace("/dashboard/events");
+        return;
       }
-      router.refresh();
+
+      if (nextUrl && nextUrl.startsWith("/") && !nextUrl.includes("ashish01234")) {
+        window.location.replace(nextUrl);
+        return;
+      }
+
+      window.location.replace("/participant/dashboard");
       
     } catch (err) {
       setError(getCleanAuthErrorMessage(err));
-    } finally {
-      setLoading(false);
+      setLoading(false); // Only set false on error so button stays disabled during redirect
     }
   }
 
@@ -135,7 +147,7 @@ export function SignupForm() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@university.edu"
+              placeholder="you@domain.com"
               className="h-12 w-full rounded-lg border border-gray-200 bg-white pl-10 pr-3 font-body text-sm text-black outline-none transition-shadow placeholder:text-gray-400 focus:border-black focus:ring-2 focus:ring-gold/40"
             />
           </div>
@@ -194,7 +206,7 @@ export function SignupForm() {
       <p className="mt-8 text-center font-body text-sm text-gray-500">
         Already have an account?{" "}
         <Link
-          href={`/login?role=${role}`}
+          href={loginUrl}
           className="font-semibold text-black underline-offset-4 hover:underline"
         >
           Sign in
