@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { 
-  ArrowRight, ShieldCheck, ChevronLeft, Github, Linkedin, Target, CheckCircle2, AlertCircle, Users, PlusSquare, Search
+  ArrowRight, ShieldCheck, ChevronLeft, Github, Linkedin, Target, CheckCircle2, AlertCircle
 } from "lucide-react";
 import Link from "next/link";
 
@@ -23,10 +23,6 @@ export default function RegistrationFormPage() {
   const [selectedTrack, setSelectedTrack] = useState<string>("");
   const [githubUrl, setGithubUrl] = useState("");
   const [linkedinUrl, setLinkedinUrl] = useState("");
-  
-  // Team Formation State
-  const [participationMode, setParticipationMode] = useState<"find" | "create">("find");
-  const [teamName, setTeamName] = useState("");
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,7 +32,7 @@ export default function RegistrationFormPage() {
   useEffect(() => {
     const initializePage = async () => {
       try {
-        // 1. Check Auth
+        // 1. Check Auth (If not logged in, boot them out)
         const res = await fetch("/api/auth/me", { cache: "no-store" });
         if (!res.ok) throw new Error("Not authenticated");
         const data = await res.json();
@@ -86,11 +82,6 @@ export default function RegistrationFormPage() {
       setError("Please select a track to compete in.");
       return;
     }
-
-    if (participationMode === "create" && !teamName.trim()) {
-      setError("Please provide a name for your new team.");
-      return;
-    }
     
     setError(null);
     setIsSubmitting(true);
@@ -105,7 +96,7 @@ export default function RegistrationFormPage() {
         });
       }
 
-      // 2. Register user for the event
+      // 2. Insert into event_registrations (Professional DB transaction)
       const { error: regError } = await supabase
         .from('event_registrations')
         .insert([{
@@ -115,46 +106,17 @@ export default function RegistrationFormPage() {
           status: 'registered'
         }]);
 
+      // If they are already registered, Supabase might throw a unique constraint error
+      // We catch it and push them to the workspace anyway
       if (regError && regError.code !== '23505') { 
-        throw new Error("Registration failed: " + regError.message);
+        throw new Error(regError.message);
       }
 
-      // 3. Handle Team Formation
-      if (participationMode === "create") {
-        // Create the team
-        const { data: team, error: teamErr } = await supabase
-          .from('teams')
-          .insert({
-            event_id: event.id,
-            name: teamName.trim().toUpperCase()
-          })
-          .select()
-          .single();
-
-        if (teamErr) {
-          throw new Error("Failed to create team. The name might already be taken by another squad.");
-        }
-
-        // Add user as leader
-        const { error: memberErr } = await supabase
-          .from('team_members')
-          .insert({
-            team_id: team.id,
-            user_id: user.id,
-            role: 'leader'
-          });
-
-        if (memberErr) throw new Error("Team created, but failed to assign leadership.");
-
-        // Route to their new team dashboard
-        router.push(`/events/${event.id}/team`);
-      } else {
-        // Mode is "find" -> Route to the Matchmaking/Discovery board
-        router.push(`/events/${event.id}/team?tab=discover`);
-      }
+      // 3. Redirect directly to the Workspace (Unstop flow)
+      router.push(`/events/${event.id}`);
 
     } catch (err: any) {
-      setError(err.message || "An unexpected error occurred. Please try again.");
+      setError(err.message || "Registration failed. Please try again.");
       setIsSubmitting(false);
     }
   };
@@ -174,7 +136,7 @@ export default function RegistrationFormPage() {
         }}
       />
 
-      <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6">
+      <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6">
         
         <Link href={`/hackathons/${slug}`} className="inline-flex items-center gap-2 font-mono text-xs font-bold uppercase mb-8 hover:text-[var(--organizer-gold-deep)] transition-colors">
           <ChevronLeft className="w-4 h-4" /> Back to Event Details
@@ -201,10 +163,10 @@ export default function RegistrationFormPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           
           {/* Main Form */}
-          <div className="lg:col-span-2">
+          <div className="md:col-span-2">
             <form onSubmit={handleSubmit} className="border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-surface)] p-6 md:p-8" style={{ boxShadow: "8px 8px 0px 0px var(--organizer-ink-primary)" }}>
               
               {/* Operator Details (Locked) */}
@@ -213,89 +175,22 @@ export default function RegistrationFormPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] font-mono font-bold uppercase text-[var(--organizer-ink-muted)] mb-1.5 block">Full Name</label>
-                    <div className="w-full bg-[var(--organizer-bg)] border-2 border-[var(--organizer-border)] p-3 font-mono text-xs font-bold text-[var(--organizer-ink-secondary)] cursor-not-allowed">
+                    <div className="w-full bg-[var(--organizer-bg)] border-2 border-[var(--organizer-border)] p-3 font-mono text-xs text-[var(--organizer-ink-secondary)] cursor-not-allowed">
                       {user?.name || "Unknown"}
                     </div>
                   </div>
                   <div>
                     <label className="text-[10px] font-mono font-bold uppercase text-[var(--organizer-ink-muted)] mb-1.5 block">Email Address</label>
-                    <div className="w-full bg-[var(--organizer-bg)] border-2 border-[var(--organizer-border)] p-3 font-mono text-xs font-bold text-[var(--organizer-ink-secondary)] cursor-not-allowed">
+                    <div className="w-full bg-[var(--organizer-bg)] border-2 border-[var(--organizer-border)] p-3 font-mono text-xs text-[var(--organizer-ink-secondary)] cursor-not-allowed">
                       {user?.email || "Unknown"}
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Participation Strategy (Unstop Style Teams) */}
-              <div className="mb-8 border-t-2 border-[var(--organizer-border)] pt-8">
-                <h3 className="font-display font-black text-xl uppercase mb-4 border-l-4 border-[var(--organizer-gold)] pl-3">Participation Strategy</h3>
-                <p className="font-mono text-[10px] font-bold uppercase text-[var(--organizer-ink-muted)] mb-4 block flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5 text-[var(--organizer-gold-deep)]" /> How do you want to participate?
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                  {/* Option 1: Find a Team */}
-                  <label 
-                    className={`relative flex flex-col p-5 border-2 cursor-pointer transition-all ${participationMode === "find" ? 'border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold-light)]' : 'border-[var(--organizer-border)] bg-[var(--organizer-bg)] hover:border-[var(--organizer-ink-primary)]'}`}
-                    style={{ boxShadow: participationMode === "find" ? "4px 4px 0px 0px var(--organizer-ink-primary)" : "none" }}
-                    onClick={() => setParticipationMode("find")}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Search className={`w-5 h-5 ${participationMode === "find" ? 'text-[var(--organizer-ink-primary)]' : 'text-[var(--organizer-ink-muted)]'}`} />
-                        <span className="font-display font-black text-lg uppercase tracking-tight">Find a Team</span>
-                      </div>
-                      <div className={`w-4 h-4 border-2 flex items-center justify-center ${participationMode === "find" ? 'border-[var(--organizer-ink-primary)] bg-[var(--organizer-ink-primary)]' : 'border-[var(--organizer-ink-muted)]'}`}>
-                        {participationMode === "find" && <CheckCircle2 className="w-3 h-3 text-white" />}
-                      </div>
-                    </div>
-                    <p className="font-mono text-[10px] font-bold text-[var(--organizer-ink-secondary)] uppercase mt-2">
-                      Register solo now. We will redirect you to the matchmaking board to browse and join open squads.
-                    </p>
-                  </label>
-
-                  {/* Option 2: Create a Team */}
-                  <label 
-                    className={`relative flex flex-col p-5 border-2 cursor-pointer transition-all ${participationMode === "create" ? 'border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold-light)]' : 'border-[var(--organizer-border)] bg-[var(--organizer-bg)] hover:border-[var(--organizer-ink-primary)]'}`}
-                    style={{ boxShadow: participationMode === "create" ? "4px 4px 0px 0px var(--organizer-ink-primary)" : "none" }}
-                    onClick={() => setParticipationMode("create")}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <PlusSquare className={`w-5 h-5 ${participationMode === "create" ? 'text-[var(--organizer-ink-primary)]' : 'text-[var(--organizer-ink-muted)]'}`} />
-                        <span className="font-display font-black text-lg uppercase tracking-tight">Create a Team</span>
-                      </div>
-                      <div className={`w-4 h-4 border-2 flex items-center justify-center ${participationMode === "create" ? 'border-[var(--organizer-ink-primary)] bg-[var(--organizer-ink-primary)]' : 'border-[var(--organizer-ink-muted)]'}`}>
-                        {participationMode === "create" && <CheckCircle2 className="w-3 h-3 text-white" />}
-                      </div>
-                    </div>
-                    <p className="font-mono text-[10px] font-bold text-[var(--organizer-ink-secondary)] uppercase mt-2">
-                      Lead your own squad. Create the team now and invite members from your dashboard later.
-                    </p>
-                  </label>
-                </div>
-
-                {/* Conditional Input if Creating a Team */}
-                {participationMode === "create" && (
-                  <div className="mt-4 p-4 border-2 border-dashed border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] animate-in fade-in slide-in-from-top-2">
-                    <label className="text-[10px] font-mono font-bold uppercase text-[var(--organizer-ink-primary)] mb-1.5 block">
-                      Squad Designation (Team Name) *
-                    </label>
-                    <input 
-                      type="text"
-                      required
-                      value={teamName}
-                      onChange={(e) => setTeamName(e.target.value.toUpperCase())}
-                      placeholder="e.g. NEURAL NINJAS"
-                      className="w-full bg-[var(--organizer-surface)] border-2 border-[var(--organizer-ink-primary)] p-3 font-mono text-sm font-black uppercase text-[var(--organizer-ink-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--organizer-gold)] placeholder:text-[var(--organizer-ink-muted)]"
-                    />
-                  </div>
-                )}
-              </div>
-
               {/* Technical Dossier (Editable) */}
               <div className="mb-8 border-t-2 border-[var(--organizer-border)] pt-8">
-                <h3 className="font-display font-black text-xl uppercase mb-4 border-l-4 border-[var(--organizer-ink-primary)] pl-3">Technical Dossier</h3>
+                <h3 className="font-display font-black text-xl uppercase mb-4 border-l-4 border-[var(--organizer-gold)] pl-3">Technical Dossier</h3>
                 <div className="space-y-4">
                   <div>
                     <label className="text-[10px] font-mono font-bold uppercase text-[var(--organizer-ink-muted)] mb-1.5 block">GitHub Profile (Recommended)</label>
@@ -359,7 +254,7 @@ export default function RegistrationFormPage() {
           </div>
 
           {/* Right Sidebar - Event Summary */}
-          <div className="lg:col-span-1 hidden md:block">
+          <div className="md:col-span-1">
             <div className="sticky top-8 bg-[var(--organizer-gold-light)] border-2 border-[var(--organizer-ink-primary)] p-6" style={{ boxShadow: "4px 4px 0px 0px var(--organizer-ink-primary)" }}>
               <div className="text-[10px] font-mono font-bold uppercase text-[var(--organizer-ink-secondary)] mb-2">Event Summary</div>
               <h3 className="font-display font-black text-2xl uppercase tracking-tight text-[var(--organizer-ink-primary)] mb-4">{event?.title}</h3>

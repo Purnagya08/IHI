@@ -11,7 +11,6 @@ import {
   Trophy,
   User,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 
 interface ParticipantUser {
   id: string;
@@ -74,7 +73,6 @@ export default function ParticipantLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const supabase = createClient();
   const [user, setUser] = useState<ParticipantUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
@@ -83,15 +81,9 @@ export default function ParticipantLayout({
 
     async function loadUser() {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        let authUser = session?.user || null;
-
-        if (!authUser) {
-          const { data: { user: fetchedUser } } = await supabase.auth.getUser();
-          authUser = fetchedUser;
-        }
-
-        if (!authUser) {
+        // Single source of truth: IHI JWT session via /api/auth/me
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) {
           if (mounted) {
             setUser(null);
             setLoadingUser(false);
@@ -99,48 +91,51 @@ export default function ParticipantLayout({
           return;
         }
 
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id, full_name, username, avatar_url, email")
-          .eq("id", authUser.id)
-          .maybeSingle();
+        const data = await res.json();
+        const u = data.user;
+        if (!u) {
+          if (mounted) {
+            setUser(null);
+            setLoadingUser(false);
+          }
+          return;
+        }
 
-        const displayName =
-          profile?.full_name ||
-          profile?.username ||
-          authUser.user_metadata?.full_name ||
-          authUser.user_metadata?.name ||
-          (authUser.email ? authUser.email.split("@")[0].toUpperCase() : "HACKER");
+        const displayName = (
+          u.full_name ||
+          u.name ||
+          u.username ||
+          (u.email ? u.email.split("@")[0] : "HACKER")
+        ).toString();
 
         if (mounted) {
           setUser({
-            id: authUser.id,
-            name: displayName,
-            email: profile?.email || authUser.email || "No email",
-            avatarUrl: profile?.avatar_url || authUser.user_metadata?.avatar_url,
+            id: u.id || u.sub,
+            name: displayName.toUpperCase(),
+            email: u.email || "No email",
+            avatarUrl: u.avatar_url || null,
           });
         }
       } catch (err) {
         console.error("Failed to load participant user:", err);
+        if (mounted) setUser(null);
       } finally {
         if (mounted) setLoadingUser(false);
       }
     }
 
     loadUser();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      loadUser();
-    });
-
     return () => {
       mounted = false;
-      subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, []);
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
     setUser(null);
     router.push("/login");
   };
@@ -171,7 +166,10 @@ export default function ParticipantLayout({
 
         {/* User Footer */}
         <div className="border-t-2 border-[var(--organizer-ink-primary)] p-3 space-y-2">
-          <div className="flex items-center gap-2.5 border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] p-2" style={{ boxShadow: "3px 3px 0px 0px var(--organizer-ink-primary)" }}>
+          <div
+            className="flex items-center gap-2.5 border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] p-2"
+            style={{ boxShadow: "3px 3px 0px 0px var(--organizer-ink-primary)" }}
+          >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold)] text-xs font-black font-mono text-[var(--organizer-ink-primary)]">
               {loadingUser
                 ? "…"

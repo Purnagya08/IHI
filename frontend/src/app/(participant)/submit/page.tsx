@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { motion, type Variants } from "framer-motion";
 import {
   Upload,
@@ -14,6 +15,7 @@ import {
   Save,
   Send,
   Zap,
+  Users,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -50,7 +52,49 @@ export default function SubmitPage() {
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [remaining, setRemaining] = useState({ d: 4, h: 15, m: 22, s: 0 });
 
-  // Demo countdown — replace end ISO with real event deadline from Supabase when ready
+  // Eligibility gate
+  const [gateLoading, setGateLoading] = useState(true);
+  const [canSubmit, setCanSubmit] = useState(false);
+  const [registered, setRegistered] = useState(false);
+  const [inTeam, setInTeam] = useState(false);
+  const [primaryEventId, setPrimaryEventId] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function checkEligibility() {
+      try {
+        const meRes = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!meRes.ok) {
+          setCanSubmit(false);
+          return;
+        }
+        const me = await meRes.json();
+        const userId = me.user?.id || me.user?.sub;
+        if (!userId) {
+          setCanSubmit(false);
+          return;
+        }
+
+        const eligRes = await fetch(
+          `/api/participant/eligibility?userId=${encodeURIComponent(userId)}`,
+          { cache: "no-store" }
+        );
+        if (eligRes.ok) {
+          const elig = await eligRes.json();
+          setRegistered(!!elig.registered);
+          setInTeam(!!elig.inTeam);
+          setCanSubmit(!!elig.canSubmit);
+          setPrimaryEventId(elig.primaryEventId || null);
+        }
+      } catch (e) {
+        console.error(e);
+        setCanSubmit(false);
+      } finally {
+        setGateLoading(false);
+      }
+    }
+    checkEligibility();
+  }, []);
+
   useEffect(() => {
     const end = Date.now() + ((4 * 24 + 15) * 60 + 22) * 60 * 1000;
     const t = setInterval(() => {
@@ -65,16 +109,18 @@ export default function SubmitPage() {
   }, []);
 
   const loadDraft = useCallback(async () => {
+    if (!canSubmit) return;
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
+      const meRes = await fetch("/api/auth/me", { cache: "no-store" });
+      if (!meRes.ok) return;
+      const me = await meRes.json();
+      const userId = me.user?.id || me.user?.sub;
+      if (!userId) return;
 
       const { data } = await supabase
         .from("submissions")
         .select("title, description, repo_url, demo_url, fields, status")
-        .eq("submitted_by", user.id)
+        .eq("submitted_by", userId)
         .order("updated_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -92,7 +138,7 @@ export default function SubmitPage() {
     } catch (e) {
       console.error(e);
     }
-  }, [supabase]);
+  }, [supabase, canSubmit]);
 
   useEffect(() => {
     loadDraft();
@@ -102,24 +148,26 @@ export default function SubmitPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
 
   const saveDraft = async () => {
+    if (!canSubmit) return;
     setSaving(true);
     setMessage(null);
     try {
       const res = await fetch("/api/submissions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, finalize: false }),
+        body: JSON.stringify({ ...form, finalize: false, eventId: primaryEventId }),
       });
       if (!res.ok) throw new Error("Save failed");
       setMessage({ type: "ok", text: "Draft saved to database." });
     } catch {
-      setMessage({ type: "ok", text: "Draft saved locally (API fallback)." });
+      setMessage({ type: "err", text: "Could not save draft. Try again." });
     } finally {
       setSaving(false);
     }
   };
 
   const finalize = async () => {
+    if (!canSubmit) return;
     if (!form.title.trim() || !form.repoUrl.trim()) {
       setMessage({ type: "err", text: "Project title and repository URL are required." });
       return;
@@ -130,7 +178,7 @@ export default function SubmitPage() {
       const res = await fetch("/api/submissions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, finalize: true }),
+        body: JSON.stringify({ ...form, finalize: true, eventId: primaryEventId }),
       });
       if (!res.ok) throw new Error("Finalize failed");
       setLocked(true);
@@ -139,11 +187,7 @@ export default function SubmitPage() {
         text: "Submission finalized & locked. AI Judge Briefing will run on evaluation.",
       });
     } catch {
-      setLocked(true);
-      setMessage({
-        type: "ok",
-        text: "Submission locked (demo mode). AI Judge Briefing armed.",
-      });
+      setMessage({ type: "err", text: "Finalize failed. Please try again." });
     } finally {
       setFinalizing(false);
     }
@@ -151,6 +195,77 @@ export default function SubmitPage() {
 
   const fieldClass =
     "w-full border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] p-3 text-xs font-mono font-bold uppercase placeholder:text-[var(--organizer-ink-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--organizer-gold)] disabled:opacity-60";
+
+  const teamHref = primaryEventId
+    ? `/events/${primaryEventId}/team`
+    : "/team";
+
+  // ── GATE: not eligible ──────────────────────────────────────
+  if (!gateLoading && !canSubmit) {
+    return (
+      <div className="relative min-h-screen bg-[var(--organizer-bg)] pb-24 text-[var(--organizer-ink-primary)]">
+        <div
+          className="pointer-events-none absolute inset-0 z-0 opacity-80"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, var(--organizer-border) 1px, transparent 1px),
+              linear-gradient(to bottom, var(--organizer-border) 1px, transparent 1px)
+            `,
+            backgroundSize: "40px 40px",
+          }}
+        />
+        <div className="relative z-10 mx-auto max-w-2xl px-4 pt-20">
+          <div
+            className="border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-surface)] p-8 text-center"
+            style={{ boxShadow: "8px 8px 0px 0px var(--organizer-ink-primary)" }}
+          >
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold)]">
+              <Lock className="h-7 w-7" />
+            </div>
+            <h1 className="font-display text-3xl font-black uppercase tracking-tight">
+              Submission Gate Locked
+            </h1>
+            <p className="mt-3 font-mono text-xs font-bold uppercase tracking-widest text-[var(--organizer-ink-muted)]">
+              Unstop-style protocol: you must register for an event and join a team before submitting.
+            </p>
+
+            <div className="mt-8 space-y-3 text-left">
+              <GateRow
+                done={registered}
+                step="1"
+                title="Register for a hackathon"
+                href="/hackathons"
+                cta="OPEN ARENA"
+              />
+              <GateRow
+                done={inTeam}
+                step="2"
+                title="Create or join a team"
+                href={registered ? teamHref : "/hackathons"}
+                cta={registered ? "TEAM BOARD" : "REGISTER FIRST"}
+              />
+              <GateRow
+                done={false}
+                step="3"
+                title="Submit project"
+                href="#"
+                cta="LOCKED"
+                locked
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (gateLoading) {
+    return (
+      <div className="min-h-screen bg-[var(--organizer-bg)] flex items-center justify-center font-mono text-xs font-bold uppercase tracking-widest">
+        Verifying submission clearance…
+      </div>
+    );
+  }
 
   return (
     <div className="relative min-h-screen bg-[var(--organizer-bg)] pb-24 text-[var(--organizer-ink-primary)] selection:bg-[var(--organizer-gold)] selection:text-white">
@@ -187,7 +302,7 @@ export default function SubmitPage() {
                 Submit <span className="text-[var(--organizer-gold-deep)]">Project.</span>
               </h1>
               <p className="mt-2 text-xs font-mono uppercase tracking-wide text-[var(--organizer-ink-muted)]">
-                Final submission & AI Judge Briefing trigger. Once finalized, your entry is locked.
+                Clearance verified — registered & teamed. Once finalized, your entry is locked.
               </p>
             </div>
             <div
@@ -224,7 +339,6 @@ export default function SubmitPage() {
         )}
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          {/* Form */}
           <div
             className="lg:col-span-8 border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-surface)] p-6"
             style={{ boxShadow: "8px 8px 0px 0px var(--organizer-gold)" }}
@@ -341,7 +455,6 @@ export default function SubmitPage() {
             </div>
           </div>
 
-          {/* Rail */}
           <div className="lg:col-span-4 space-y-4">
             <div
               className="border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-surface)] p-5"
@@ -377,51 +490,18 @@ export default function SubmitPage() {
               className="border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-surface)] p-5"
               style={{ boxShadow: "6px 6px 0px 0px var(--organizer-gold)" }}
             >
-              <div className="mb-3 text-[10px] font-bold font-mono uppercase tracking-widest text-[var(--organizer-ink-muted)]">
-                Submission Guidelines
+              <div className="mb-3 flex items-center gap-2 text-[10px] font-bold font-mono uppercase tracking-widest text-[var(--organizer-ink-muted)]">
+                <Users className="h-3.5 w-3.5 text-[var(--organizer-gold-deep)]" />
+                Clearance
               </div>
-              <ol className="space-y-3 text-[11px] font-mono text-[var(--organizer-ink-secondary)]">
-                <li className="flex gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center border border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold)] text-[9px] font-black text-white">
-                    1
-                  </span>
-                  <span>
-                    <strong className="text-[var(--organizer-ink-primary)]">Repository Access</strong>
-                    <br />
-                    Public GitHub/GitLab only. Private repos cannot be evaluated.
-                  </span>
+              <ul className="space-y-2 font-mono text-[10px] font-bold uppercase">
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Event registered
                 </li>
-                <li className="flex gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center border border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold)] text-[9px] font-black text-white">
-                    2
-                  </span>
-                  <span>
-                    <strong className="text-[var(--organizer-ink-primary)]">Detailed README</strong>
-                    <br />
-                    Setup, stack, and problem solved.
-                  </span>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Team membership verified
                 </li>
-                <li className="flex gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center border border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold)] text-[9px] font-black text-white">
-                    3
-                  </span>
-                  <span>
-                    <strong className="text-[var(--organizer-ink-primary)]">Working Demo</strong>
-                    <br />
-                    Deployed app or video improves UX scores.
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center border border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold)] text-[9px] font-black text-white">
-                    4
-                  </span>
-                  <span>
-                    <strong className="text-[var(--organizer-ink-primary)]">Immutable Handoff</strong>
-                    <br />
-                    Finalize locks the entry. Only organizers can unlock.
-                  </span>
-                </li>
-              </ol>
+              </ul>
             </div>
 
             <div className="border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold-light)] p-4 text-[10px] font-mono uppercase leading-relaxed">
@@ -431,6 +511,51 @@ export default function SubmitPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function GateRow({
+  done,
+  step,
+  title,
+  href,
+  cta,
+  locked,
+}: {
+  done: boolean;
+  step: string;
+  title: string;
+  href: string;
+  cta: string;
+  locked?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 border-2 p-4 ${
+        done
+          ? "border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold-light)]"
+          : "border-[var(--organizer-border)] bg-[var(--organizer-bg)]"
+      }`}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-surface)] font-mono text-xs font-black">
+          {done ? <CheckCircle2 className="h-4 w-4" /> : step}
+        </div>
+        <span className="font-mono text-xs font-bold uppercase truncate">{title}</span>
+      </div>
+      {locked ? (
+        <span className="font-mono text-[9px] font-black uppercase text-[var(--organizer-ink-muted)] flex items-center gap-1">
+          <Lock className="h-3 w-3" /> {cta}
+        </span>
+      ) : (
+        <Link
+          href={href}
+          className="shrink-0 border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-ink-primary)] px-3 py-1.5 font-mono text-[9px] font-black uppercase text-white hover:bg-[var(--organizer-gold)] hover:text-[var(--organizer-ink-primary)]"
+        >
+          {cta}
+        </Link>
+      )}
     </div>
   );
 }
