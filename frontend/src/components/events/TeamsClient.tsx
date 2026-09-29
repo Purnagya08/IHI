@@ -7,9 +7,9 @@ import { GridBackground } from '@/components/dashboard/GridBackground';
 import { organizerNavigation } from '@/components/layout/navigation';
 import { getAuthSession, type UserProfile } from '@/lib/auth';
 
-type TeamHealth = 'Full' | 'Needs Members' | 'At Risk';
+export type TeamHealth = 'Full' | 'Needs Members' | 'At Risk';
 
-interface Team {
+export interface FormattedTeam {
   id: string;
   name: string;
   lead: string;
@@ -20,18 +20,16 @@ interface Team {
   created: string;
 }
 
-const MOCK_TEAMS: Team[] = [
-  { id: 'TM-001', name: 'Team Quantum', lead: 'Alex Kim', track: 'AI/ML', members: 4, capacity: 4, health: 'Full', created: '2h ago' },
-  { id: 'TM-002', name: 'ByteForce', lead: 'Marcus Vance', track: 'Web3 & DeFi', members: 3, capacity: 4, health: 'Needs Members', created: '5h ago' },
-  { id: 'TM-003', name: 'Null Pointer', lead: 'Dave Miller', track: 'Hardware', members: 1, capacity: 4, health: 'At Risk', created: '1d ago' },
-  { id: 'TM-004', name: 'Syntax Error', lead: 'Elena Rostova', track: 'AI/ML', members: 4, capacity: 4, health: 'Full', created: '1d ago' },
-  { id: 'TM-005', name: 'Cloud Nine', lead: 'Sarah Jenkins', track: 'Cloud Infrastructure', members: 2, capacity: 4, health: 'Needs Members', created: '2d ago' },
-];
+interface Props {
+  eventId: string;
+  initialTeams: FormattedTeam[];
+}
 
-export function TeamsClient({ eventId }: { eventId: string }) {
+export function TeamsClient({ eventId, initialTeams = [] }: Props) {
   const [user, setUser] = useState<UserProfile>({ name: 'Organizer', email: 'organizer@platform.com' });
   const [searchQuery, setSearchQuery] = useState('');
   const [healthFilter, setHealthFilter] = useState<'All' | TeamHealth>('All');
+  const [teams, setTeams] = useState<FormattedTeam[]>(initialTeams);
   const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
@@ -40,15 +38,28 @@ export function TeamsClient({ eventId }: { eventId: string }) {
   }, []);
 
   // Filter Logic
-  const filteredTeams = MOCK_TEAMS.filter((team) => {
-    const matchesSearch = team.name.toLowerCase().includes(searchQuery.toLowerCase()) || team.lead.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredTeams = teams.filter((team) => {
+    const matchesSearch = team.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          team.lead.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesHealth = healthFilter === 'All' || team.health === healthFilter;
     return matchesSearch && matchesHealth;
   });
 
   const handleExportCSV = () => {
     setIsExporting(true);
-    setTimeout(() => setIsExporting(false), 1000);
+    const headers = ['Team ID', 'Team Name', 'Lead', 'Track', 'Members', 'Capacity', 'Health Status', 'Created Date'];
+    const csvContent = [
+      headers.join(','),
+      ...teams.map(t => `"${t.id}","${t.name}","${t.lead}","${t.track}",${t.members},${t.capacity},"${t.health}","${t.created}"`)
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `teams_export_${eventId}.csv`;
+    link.click();
+
+    setIsExporting(false);
   };
 
   const getHealthStyles = (health: TeamHealth) => {
@@ -56,13 +67,14 @@ export function TeamsClient({ eventId }: { eventId: string }) {
       case 'Full': return 'bg-emerald-50 border-emerald-200 text-emerald-700';
       case 'Needs Members': return 'bg-amber-50 border-amber-200 text-amber-800';
       case 'At Risk': return 'bg-red-50 border-red-200 text-red-700';
+      default: return 'bg-[#FAF9F5] border-[#E6E5E0] text-[#706F6B]';
     }
   };
 
-  // Stats for the top summary
-  const totalTeams = MOCK_TEAMS.length;
-  const fullTeams = MOCK_TEAMS.filter(t => t.health === 'Full').length;
-  const lookingForMembers = totalTeams - fullTeams;
+  // Stats computed from real Supabase data
+  const totalTeams = teams.length;
+  const fullTeams = teams.filter(t => t.health === 'Full').length;
+  const lookingForMembers = teams.filter(t => t.health === 'Needs Members' || t.health === 'At Risk').length;
 
   return (
     <div className="relative min-h-screen bg-[#F9F9F6]">
@@ -72,7 +84,7 @@ export function TeamsClient({ eventId }: { eventId: string }) {
         role="organizer"
         userName={user.name}
         userEmail={user.email}
-        eventName={user.eventName || 'Stanford TreeHacks 2025'}
+        eventName={user.eventName || 'Live Event Console'}
         navigation={organizerNavigation}
       >
         <div className="relative z-10 mx-auto max-w-7xl p-4 md:p-6 lg:p-8 space-y-6">
@@ -87,18 +99,15 @@ export function TeamsClient({ eventId }: { eventId: string }) {
                 Team Oversight
               </h1>
               <p className="text-xs text-[#706F6B] mt-1 font-sans">
-                Monitor team formation health, manage capacities, and matchmake solo hackers.
+                Monitor team formation health, manage capacities, and track registered teams in real-time.
               </p>
             </div>
 
             <div className="flex items-center gap-3">
-              <button className="px-3.5 py-1.5 rounded-lg border border-[#E6E5E0] bg-white hover:bg-[#FAF9F5] text-xs font-mono font-bold text-[#0A0A0A] transition-all">
-                Matchmake Solos
-              </button>
               <button 
                 onClick={handleExportCSV}
-                disabled={isExporting}
-                className="px-3.5 py-1.5 rounded-lg border border-[#E6E5E0] bg-[#0A0A0A] hover:bg-[#C6A24A] text-white text-xs font-mono font-bold transition-all shadow-sm disabled:opacity-70"
+                disabled={isExporting || teams.length === 0}
+                className="px-3.5 py-1.5 rounded-lg border border-[#E6E5E0] bg-[#0A0A0A] hover:bg-[#C6A24A] text-white text-xs font-mono font-bold transition-all shadow-sm disabled:opacity-70 disabled:hover:bg-[#0A0A0A]"
               >
                 {isExporting ? 'Exporting...' : 'Export Teams CSV'}
               </button>
@@ -108,7 +117,7 @@ export function TeamsClient({ eventId }: { eventId: string }) {
           {/* Quick Stats & Controls */}
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-[#E6E5E0] shadow-sm">
             
-            {/* Quick Stats */}
+            {/* Real Stats */}
             <div className="flex items-center gap-6 px-2">
               <div>
                 <p className="text-[10px] font-mono text-[#706F6B] uppercase">Total Teams</p>
@@ -173,7 +182,7 @@ export function TeamsClient({ eventId }: { eventId: string }) {
                     <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B]">Team Lead</th>
                     <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B]">Members / Capacity</th>
                     <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B]">Formation Health</th>
-                    <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B] text-right">Actions</th>
+                    <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B] text-right">Created</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F0EFEA]">
@@ -185,7 +194,7 @@ export function TeamsClient({ eventId }: { eventId: string }) {
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.98 }}
-                          transition={{ duration: 0.2, delay: i * 0.05 }}
+                          transition={{ duration: 0.2, delay: i * 0.02 }}
                           className="group hover:bg-[#FAF9F5] transition-colors"
                         >
                           {/* Team Info */}
@@ -238,35 +247,34 @@ export function TeamsClient({ eventId }: { eventId: string }) {
                             </span>
                           </td>
 
-                          {/* Actions */}
-                          <td className="px-5 py-4 text-right">
-                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button className="p-1.5 rounded text-[#706F6B] hover:text-[#0A0A0A] hover:bg-white border border-transparent hover:border-[#E6E5E0] shadow-sm transition-all" title="Message Team">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                              </button>
-                              <button className="px-3 py-1.5 rounded border border-[#E6E5E0] bg-white text-[10px] font-mono font-bold text-[#0A0A0A] hover:bg-[#FAF9F5] shadow-sm transition-all">
-                                View Details
-                              </button>
-                            </div>
+                          {/* Created */}
+                          <td className="px-5 py-4 text-right font-mono text-[10px] text-[#706F6B]">
+                            {team.created}
                           </td>
                         </motion.tr>
                       ))
                     ) : (
-                      // Empty State
+                      // Blueprint Empty State
                       <tr>
                         <td colSpan={5}>
-                          <div className="py-16 flex flex-col items-center justify-center text-center">
-                            <div className="h-12 w-12 rounded-full border border-[#E6E5E0] bg-[#FAF9F5] flex items-center justify-center mb-3 text-[#C6A24A]">
-                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                          <div className="py-24 flex flex-col items-center justify-center text-center">
+                            <div className="h-16 w-16 rounded-full border-2 border-dashed border-[#E6E5E0] bg-white flex items-center justify-center mb-4 text-[#C6A24A]">
+                              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
                             </div>
-                            <h3 className="font-serif text-lg font-bold text-[#0A0A0A]">No teams found</h3>
-                            <p className="text-xs text-[#706F6B] mt-1">No teams match your current filter or search criteria.</p>
-                            <button 
-                              onClick={() => {setSearchQuery(''); setHealthFilter('All');}}
-                              className="mt-4 px-3 py-1.5 rounded bg-[#FAF9F5] border border-[#E6E5E0] text-[10px] font-mono font-bold text-[#0A0A0A] hover:text-[#C6A24A]"
-                            >
-                              Clear Filters
-                            </button>
+                            <h3 className="font-serif text-xl font-bold text-[#0A0A0A]">No teams formed yet</h3>
+                            <p className="text-sm text-[#706F6B] mt-2 max-w-sm">
+                              {teams.length === 0 
+                                ? "No teams have been created for this event yet. Once participants start forming teams, they will appear here."
+                                : "No teams match your current filter or search criteria."}
+                            </p>
+                            {teams.length > 0 && (
+                              <button 
+                                onClick={() => {setSearchQuery(''); setHealthFilter('All');}}
+                                className="mt-6 px-4 py-2 rounded-lg bg-[#0A0A0A] border border-[#0A0A0A] text-xs font-mono font-bold text-white hover:bg-[#C6A24A] hover:border-[#C6A24A] transition-all"
+                              >
+                                Clear All Filters
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

@@ -1,5 +1,10 @@
-import { OrganizerDashboardClient } from "@/components/dashboard/OrganizerDashboardClient";
+import { EventsListClient } from "@/components/events/EventsListClient";
 
-export default function OrganizerDashboardPage() {
-  return <OrganizerDashboardClient />;
+export const metadata = {
+  title: "Organizer Console | IHI",
+  description: "Manage your active hackathons and events.",
+};
+
+export default function DashboardPage() {
+  return <EventsListClient />;
 }

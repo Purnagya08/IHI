@@ -26,12 +26,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Honor explicit ?next= redirect (e.g. judge magic-link -> /judge/queue)
-    if (next) {
+    // Honor safe local ?next= redirects (e.g. judge magic-link -> /judge/queue).
+    if (
+      next &&
+      next.startsWith("/") &&
+      !next.startsWith("//") &&
+      !next.includes("ashish01234")
+    ) {
       return NextResponse.redirect(new URL(next, requestUrl.origin));
     }
 
-    // Role-aware routing (Organizers -> /dashboard, Judges -> /judge/queue)
+    // Role-aware routing (organizers -> /dashboard/events).
     const destination = await getPostLoginRedirectUrl(supabase, data.user);
     return NextResponse.redirect(new URL(destination, requestUrl.origin));
   }

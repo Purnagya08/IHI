@@ -122,14 +122,14 @@ function QueueContent() {
   const [demoMode, setDemoMode] = useState(false);
   
   // Track active event ID
-  const [activeEventId, setActiveEventId] = useState<string>(urlEventId || "ashish01234");
+  const [activeEventId, setActiveEventId] = useState<string>(urlEventId || "");
 
   const loadQueue = useCallback(async () => {
     setAuthError(null);
     setLoading(true);
     
     try {
-      // 1. Resolve exact Event ID (URL -> Cookie -> Fallback)
+      // 1. Resolve the exact event ID from the URL or session cookie.
       let resolvedEventId = urlEventId;
       if (!resolvedEventId && typeof document !== "undefined") {
         const cookieEvent = document.cookie
@@ -138,7 +138,12 @@ function QueueContent() {
           ?.split("=")[1];
         if (cookieEvent) resolvedEventId = decodeURIComponent(cookieEvent);
       }
-      resolvedEventId = resolvedEventId || "ashish01234";
+      if (!resolvedEventId) {
+        setAuthError("An event ID is required to load the judging queue.");
+        setDemoMode(false);
+        setQueue([]);
+        return;
+      }
       setActiveEventId(resolvedEventId);
 
       // 2. Fetch live data from API

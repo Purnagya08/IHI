@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { GridBackground } from '@/components/dashboard/GridBackground';
-import { organizerNavigation } from '@/components/layout/navigation';
+import { getOrganizerNavigation } from '@/components/layout/navigation';
 import { getAuthSession, type UserProfile } from '@/lib/auth';
 
 export function EventSectionPlaceholder({
@@ -34,8 +34,8 @@ export function EventSectionPlaceholder({
         role="organizer"
         userName={user.name}
         userEmail={user.email}
-        eventName={user.eventName || 'Stanford TreeHacks 2025'}
-        navigation={organizerNavigation}
+        eventName={user.eventName || 'Live Event Console'}
+        navigation={getOrganizerNavigation(eventId)}
       >
         <div className="relative z-10 mx-auto max-w-7xl p-4 md:p-6 lg:p-8 space-y-6">
           <div className="border-b border-[#E6E5E0] pb-5">

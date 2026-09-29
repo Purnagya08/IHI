@@ -57,8 +57,15 @@ async function createJudgeSessionResponse(
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const email = searchParams.get("email") || "ashish863863@gmail.com";
-  const eventId = searchParams.get("eventId") || "ashish01234";
+  const email = searchParams.get("email")?.trim();
+  const eventId = searchParams.get("eventId")?.trim();
+
+  if (!email || !eventId) {
+    return NextResponse.json(
+      { error: "Email and event ID are required." },
+      { status: 400 }
+    );
+  }
 
   return createJudgeSessionResponse(email, eventId, "/judge/queue", request.url);
 }
@@ -66,8 +73,15 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const email = body.email || "ashish863863@gmail.com";
-    const eventId = body.eventId || "ashish01234";
+    const email = String(body.email || "").trim();
+    const eventId = String(body.eventId || "").trim();
+
+    if (!email || !eventId) {
+      return NextResponse.json(
+        { error: "Email and event ID are required." },
+        { status: 400 }
+      );
+    }
 
     return createJudgeSessionResponse(email, eventId, "/judge/queue", request.url);
   } catch {

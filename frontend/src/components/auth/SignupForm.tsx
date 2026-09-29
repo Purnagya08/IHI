@@ -1,37 +1,32 @@
 "use client";
 
-import { useState, useMemo, FormEvent } from "react";
+import React, { useState, useMemo, FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { SignupRoleTabs, type SignupRole } from "./SignupRoleTabs";
-import { getCleanAuthErrorMessage } from "@/lib/auth/errors";
+import { User, Mail, Lock, ArrowRight, AlertCircle, Shield } from "lucide-react";
 import { setAuthSession } from "@/lib/auth";
+import { getCleanAuthErrorMessage } from "@/lib/auth/errors";
+
+type Role = "participant" | "organizer";
 
 export function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // If someone tries to pass ?role=judge, force them to participant.
+  // If someone passes ?role=..., safely parse it
   const initialRole = searchParams.get("role") as string;
-  const validRole: SignupRole = ["participant", "organizer"].includes(initialRole) 
-    ? (initialRole as SignupRole) 
+  const validRole: Role = ["participant", "organizer"].includes(initialRole) 
+    ? (initialRole as Role) 
     : "participant";
 
-  const [role, setRole] = useState<SignupRole>(validRole);
+  const [role, setRole] = useState<Role>(validRole);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const subtitle = useMemo(() => {
-    return role === "organizer" 
-      ? "Setup your organizer profile to start hosting." 
-      : "Join the community to build and compete.";
-  }, [role]);
-
-  async function onSubmit(e: FormEvent) {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
@@ -57,190 +52,185 @@ export function SignupForm() {
         {
           name: data.user?.name || name.trim(),
           email: data.user?.email || email.trim(),
-          eventName: data.user?.eventName || "Stanford TreeHacks 2025",
+          eventName: "IHI Console",
           role: data.user?.role || role,
         },
         data.token
       );
 
-      if ((data.user?.role || role) === "participant") {
-        router.push("/hackathons");
-      } else {
-        router.push("/dashboard");
+      // --- HARD REDIRECT TO BYPASS CACHE ---
+      const nextUrl = searchParams.get("redirect") || searchParams.get("next");
+      
+      if (role === "organizer") {
+        window.location.replace("/dashboard/events");
+        return;
       }
-      router.refresh();
+
+      if (nextUrl && nextUrl.startsWith("/") && !nextUrl.includes("ashish01234")) {
+        window.location.replace(nextUrl);
+        return;
+      }
+
+      window.location.replace("/participant/dashboard");
       
     } catch (err) {
       setError(getCleanAuthErrorMessage(err));
-    } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
-    <div className="w-full max-w-md">
-      <div className="mb-8">
-        <h1 className="font-display text-3xl font-bold tracking-tight text-black md:text-4xl">
-          Create an account
-        </h1>
-        <p className="mt-2 font-body text-base text-gray-500">{subtitle}</p>
-      </div>
-
-      <form onSubmit={onSubmit} className="space-y-5" noValidate>
-        <SignupRoleTabs
-          value={role}
-          onChange={(r) => {
-            setRole(r);
-            setError(null);
-          }}
-        />
-
-        {/* Full Name */}
-        <div>
-          <label htmlFor="name" className="mb-1.5 block font-body text-sm font-medium text-black">
-            Full Name
-          </label>
-          <div className="relative">
-            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400">
-              <UserIcon />
-            </span>
-            <input
-              id="name"
-              name="name"
-              type="text"
-              required
-              autoComplete="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={role === "organizer" ? "Jane Doe" : "Alex Chen"}
-              className="h-12 w-full rounded-lg border border-gray-200 bg-white pl-10 pr-3 font-body text-sm text-black outline-none transition-shadow placeholder:text-gray-400 focus:border-black focus:ring-2 focus:ring-gold/40"
-            />
+    <div className="w-full max-w-md mx-auto">
+      {/* ERROR BANNER */}
+      {error && (
+        <div
+          className="mb-6 border-2 border-red-600 bg-red-50 p-4 flex items-start gap-3"
+          style={{ boxShadow: "4px 4px 0px 0px #dc2626" }}
+        >
+          <Shield className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="font-mono text-[10px] font-black uppercase tracking-widest text-red-700 mb-0.5">
+              Registration Error
+            </div>
+            <div className="font-mono text-xs font-bold text-red-900">{error}</div>
           </div>
         </div>
+      )}
 
-        {/* Email */}
-        <div>
-          <label htmlFor="email" className="mb-1.5 block font-body text-sm font-medium text-black">
-            Email address
-          </label>
-          <div className="relative">
-            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400">
-              <MailIcon />
-            </span>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@university.edu"
-              className="h-12 w-full rounded-lg border border-gray-200 bg-white pl-10 pr-3 font-body text-sm text-black outline-none transition-shadow placeholder:text-gray-400 focus:border-black focus:ring-2 focus:ring-gold/40"
-            />
-          </div>
+      {/* MAIN CARD — Blueprint UI */}
+      <div
+        className="border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-surface)] p-6 md:p-8"
+        style={{ boxShadow: "8px 8px 0px 0px var(--organizer-ink-primary)" }}
+      >
+        {/* Header */}
+        <div className="mb-6">
+          <h1 className="text-3xl md:text-4xl font-black font-display uppercase tracking-tight text-[var(--organizer-ink-primary)] leading-none">
+            INITIALIZE <span className="text-[var(--organizer-gold-deep)]">PROFILE.</span>
+          </h1>
+          <p className="mt-2 font-mono text-[10px] font-bold uppercase tracking-widest text-[var(--organizer-ink-muted)]">
+            CREATE YOUR SYSTEM IDENTITY TO PROCEED.
+          </p>
         </div>
 
-        {/* Password */}
-        <div>
-          <label htmlFor="password" className="mb-1.5 block font-body text-sm font-medium text-black">
-            Password
-          </label>
-          <div className="relative">
-            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400">
-              <LockIcon />
-            </span>
-            <input
-              id="password"
-              name="password"
-              type={showPassword ? "text" : "password"}
-              autoComplete="new-password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 8 characters"
-              className="h-12 w-full rounded-lg border border-gray-200 bg-white pl-10 pr-12 font-body text-sm text-black outline-none transition-shadow placeholder:text-gray-400 focus:border-black focus:ring-2 focus:ring-gold/40"
-            />
+        {/* ROLE TABS */}
+        <div className="grid grid-cols-2 gap-0 border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] p-1 mb-6">
+          {(["participant", "organizer"] as const).map((r) => (
             <button
+              key={r}
               type="button"
-              onClick={() => setShowPassword((s) => !s)}
-              className="absolute inset-y-0 right-2 flex items-center rounded-md px-2 text-xs font-semibold text-gray-500 hover:text-black"
+              onClick={() => {
+                setRole(r);
+                setError(null);
+              }}
+              className={`py-2.5 text-[10px] font-mono font-black uppercase tracking-wider transition-all ${
+                role === r
+                  ? "bg-[var(--organizer-gold)] text-[var(--organizer-ink-primary)] border border-[var(--organizer-ink-primary)]"
+                  : "text-[var(--organizer-ink-muted)] hover:text-[var(--organizer-ink-primary)]"
+              }`}
             >
-              {showPassword ? "Hide" : "Show"}
+              {r}
             </button>
-          </div>
+          ))}
         </div>
 
-        {/* Error Alert */}
-        {error && (
-          <div role="alert" className="rounded-lg border border-black/10 bg-gray-50 px-3 py-2 font-body text-sm text-black flex items-start gap-2">
-            <span className="mt-0.5 text-black"><AlertIcon /></span>
-            <span>{error}</span>
+        {/* FORM */}
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          
+          {/* NAME */}
+          <div>
+            <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-widest text-[var(--organizer-ink-muted)]">
+              Full Name
+            </label>
+            <div className="relative">
+              <User className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--organizer-ink-muted)]" />
+              <input
+                type="text"
+                required
+                autoComplete="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Alex Chen"
+                className="w-full border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] py-3 pl-10 pr-4 font-mono text-xs font-bold text-[var(--organizer-ink-primary)] placeholder:text-[var(--organizer-ink-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--organizer-gold)]"
+              />
+            </div>
           </div>
-        )}
 
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={loading}
-          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold px-6 font-body text-sm font-bold uppercase tracking-wider text-black transition-all duration-200 hover:-translate-y-px hover:bg-gold-light hover:shadow-lg hover:shadow-gold/20 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 motion-reduce:transform-none"
-        >
-          {loading ? "Creating account…" : "Create Account"}
-          {!loading && <ArrowIcon />}
-        </button>
-      </form>
+          {/* EMAIL */}
+          <div>
+            <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-widest text-[var(--organizer-ink-muted)]">
+              Identity (Email)
+            </label>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--organizer-ink-muted)]" />
+              <input
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@domain.com"
+                className="w-full border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] py-3 pl-10 pr-4 font-mono text-xs font-bold text-[var(--organizer-ink-primary)] placeholder:text-[var(--organizer-ink-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--organizer-gold)]"
+              />
+            </div>
+          </div>
 
-      <p className="mt-8 text-center font-body text-sm text-gray-500">
-        Already have an account?{" "}
-        <Link
-          href={`/login?role=${role}`}
-          className="font-semibold text-black underline-offset-4 hover:underline"
-        >
-          Sign in
-        </Link>
-      </p>
+          {/* PASSWORD */}
+          <div>
+            <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-widest text-[var(--organizer-ink-muted)]">
+              Secure Passkey
+            </label>
+            <div className="relative">
+              <Lock className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--organizer-ink-muted)]" />
+              <input
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Minimum 8 characters"
+                className="w-full border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] py-3 pl-10 pr-4 font-mono text-xs font-bold text-[var(--organizer-ink-primary)] placeholder:text-[var(--organizer-ink-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--organizer-gold)]"
+              />
+            </div>
+          </div>
+
+          {/* SUBMIT */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-gold)] py-4 font-mono text-xs font-black uppercase tracking-widest text-[var(--organizer-ink-primary)] transition-all hover:bg-[var(--organizer-gold-light)] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 mt-6"
+            style={{ boxShadow: "4px 4px 0px 0px var(--organizer-ink-primary)" }}
+          >
+            {loading ? (
+              "INITIALIZING..."
+            ) : (
+              <>
+                CREATE {role.toUpperCase()} ACCOUNT
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </button>
+        </form>
+
+        {/* FOOTER LOGIN */}
+        <div className="mt-8 border-t-2 border-[var(--organizer-border)] pt-6 text-center">
+          <p className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-[var(--organizer-ink-muted)]">
+            Already have clearance?
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              const redirect = searchParams.get("redirect") || searchParams.get("next");
+              const url = redirect ? `/login?role=${role}&redirect=${encodeURIComponent(redirect)}` : `/login?role=${role}`;
+              router.push(url);
+            }}
+            className="inline-flex items-center gap-2 border-2 border-[var(--organizer-ink-primary)] bg-[var(--organizer-bg)] px-5 py-2.5 font-mono text-[10px] font-black uppercase tracking-wider text-[var(--organizer-ink-primary)] transition-colors hover:bg-[var(--organizer-gold-light)]"
+          >
+            SIGN IN TO EXISTING ACCOUNT
+          </button>
+        </div>
+
+      </div>
     </div>
-  );
-}
-
-// Minimal inline icons
-function UserIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="5" r="3" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-function MailIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M2.5 4.5L8 9l5.5-4.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function LockIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M5 7V5.5a3 3 0 016 0V7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-function AlertIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M8 4.5v4.5M8 11.5h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-function ArrowIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }
