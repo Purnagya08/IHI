@@ -70,13 +70,13 @@ export async function getPostLoginRedirectUrl(
 function resolveRoleRedirect(role?: string, eventId?: string): string {
   switch (role) {
     case "organizer":
-      return "/dashboard";
+      return "/dashboard/events";
     case "judge":
       return eventId
         ? `/judge/queue?eventId=${encodeURIComponent(eventId)}`
         : "/judge/queue";
     case "participant":
     default:
-      return "/team";
+      return "/participant/dashboard";
   }
 }

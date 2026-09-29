@@ -10,8 +10,8 @@ function JudgeLoginForm() {
   const searchParams = useSearchParams();
   const errorParam = searchParams.get("error");
 
-  const [email, setEmail] = useState("ashish863863@gmail.com");
-  const [eventId, setEventId] = useState("ashish01234");
+  const [email, setEmail] = useState("");
+  const [eventId, setEventId] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(
     errorParam ? { type: "error", text: "Session expired or invalid. Authenticate below." } : null
@@ -100,7 +100,7 @@ function JudgeLoginForm() {
               value={eventId}
               onChange={(e) => setEventId(e.target.value)}
               className="w-full bg-[var(--organizer-bg)] border-2 border-[var(--organizer-ink-primary)] p-3 font-mono text-xs uppercase font-bold text-[var(--organizer-ink-primary)] placeholder:text-[var(--organizer-ink-muted)] focus:outline-none focus:ring-0 focus:shadow-[4px_4px_0px_0px_var(--organizer-gold)] transition-all"
-              placeholder="ashish01234"
+              placeholder="event-id"
             />
           </div>
 

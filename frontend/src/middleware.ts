@@ -44,15 +44,17 @@ function isPublic(pathname: string): boolean {
   return false;
 }
 
+// STRICT CHECK: Matches /dashboard or /dashboard/*, but NOT /participant/dashboard
 function isOrganizerRoute(pathname: string): boolean {
-  return pathname.startsWith("/dashboard") || pathname.includes("/dashboard");
+  return pathname === "/dashboard" || pathname.startsWith("/dashboard/");
 }
+
 function isParticipantRoute(pathname: string): boolean {
   return (
+    pathname.startsWith("/participant") ||
     pathname.startsWith("/team") ||
     pathname.startsWith("/submit") ||
-    pathname.startsWith("/results") ||
-    pathname.startsWith("/participant")
+    pathname.startsWith("/results")
   );
 }
 
@@ -106,62 +108,67 @@ function judgeLoginRedirect(req: NextRequest, reason?: string) {
   return NextResponse.redirect(url);
 }
 
-function forbiddenRedirect(req: NextRequest) {
+function roleHomeRedirect(req: NextRequest, role: Role) {
   const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.search = "?error=FORBIDDEN";
+  if (role === "organizer") {
+    url.pathname = "/dashboard/events";
+  } else if (role === "judge") {
+    url.pathname = "/judge/queue";
+  } else {
+    url.pathname = "/participant/dashboard";
+  }
+  url.search = "";
   return NextResponse.redirect(url);
 }
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // 1. Allow public routes
   if (isPublic(pathname)) {
     return NextResponse.next();
   }
 
+  // 2. Parse session claims
   const claims = await readClaims(req);
 
-  // Judge routes validation
+  // 3. Judge routes
   if (isJudgeRoute(pathname)) {
-    // Check JWT claim role first
-    if (claims?.role === "judge") {
-      return NextResponse.next();
-    }
-
-    // Fallback check for active judge cookies
+    if (claims?.role === "judge") return NextResponse.next();
     const judgeRole = req.cookies.get("ihi_role")?.value;
     const judgeSession = req.cookies.get("ihi_judge_session")?.value;
-
-    if (judgeRole === "judge" || judgeSession === "active") {
-      return NextResponse.next();
-    }
+    if (judgeRole === "judge" || judgeSession === "active") return NextResponse.next();
 
     return judgeLoginRedirect(req, "SESSION_EXPIRED");
   }
 
+  // 4. Unauthenticated -> Login
   if (!claims) {
     return loginRedirect(req, "SESSION_MISSING");
   }
 
-  if (pathname.startsWith("/events")) {
-    if (claims.role !== "organizer" && claims.role !== "participant") {
-      return forbiddenRedirect(req);
+  // 5. Participant routes (/participant/*, /team, /submit...)
+  if (isParticipantRoute(pathname)) {
+    if (claims.role === "participant" || claims.role === "organizer") {
+      return NextResponse.next();
     }
-    return NextResponse.next();
-  }
-  if (isOrganizerRoute(pathname)) {
-    if (claims.role !== "organizer") {
-      return forbiddenRedirect(req);
-    }
-    return NextResponse.next();
+    return roleHomeRedirect(req, claims.role);
   }
 
-  if (isParticipantRoute(pathname)) {
-    if (claims.role !== "participant" && claims.role !== "organizer") {
-      return forbiddenRedirect(req);
+  // 6. Organizer routes (/dashboard, /dashboard/*)
+  if (isOrganizerRoute(pathname)) {
+    if (claims.role === "organizer") {
+      return NextResponse.next();
     }
-    return NextResponse.next();
+    return roleHomeRedirect(req, claims.role);
+  }
+
+  // 7. Events routes
+  if (pathname.startsWith("/events")) {
+    if (claims.role === "organizer" || claims.role === "participant") {
+      return NextResponse.next();
+    }
+    return roleHomeRedirect(req, claims.role);
   }
 
   return NextResponse.next();

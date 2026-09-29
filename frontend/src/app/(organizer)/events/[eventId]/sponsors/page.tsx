@@ -4,7 +4,7 @@ import React, { useEffect, useState, use } from "react";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button, Card } from "@/components/ui";
-import { organizerNavigation } from "@/components/layout/navigation";
+import { getOrganizerNavigation } from "@/components/layout/navigation";
 import type { Sponsor } from "@/types/sponsor";
 
 // Semantic Badges
@@ -83,7 +83,7 @@ export default function OrganizerSponsorsPage({ params }: { params: Promise<{ id
       userName="Hackathon Lead"
       userEmail="organizer@ihi.io"
       eventName="Event Management"
-      navigation={organizerNavigation}
+      navigation={getOrganizerNavigation(eventId)}
     >
       <div className="max-w-[1400px] mx-auto px-6 py-8 space-y-8 bg-[var(--organizer-bg)]">
         <PageHeader

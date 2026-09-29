@@ -27,6 +27,14 @@ export function EventSectionPlaceholder({
     if (session?.name) setUser(session);
   }, []);
 
+  // Compute navigation dynamically whether organizerNavigation is a function or an array
+  const navigationItems =
+    typeof organizerNavigation === 'function'
+      ? (organizerNavigation as (id: string) => unknown)(eventId)
+      : Array.isArray(organizerNavigation)
+      ? organizerNavigation
+      : [];
+
   return (
     <div className="relative min-h-screen bg-[#F9F9F6]">
       <GridBackground />
@@ -34,8 +42,8 @@ export function EventSectionPlaceholder({
         role="organizer"
         userName={user.name}
         userEmail={user.email}
-        eventName={user.eventName || 'Stanford TreeHacks 2025'}
-        navigation={organizerNavigation}
+        eventName={user.eventName || 'Live Event Console'}
+        navigation={navigationItems as any}
       >
         <div className="relative z-10 mx-auto max-w-7xl p-4 md:p-6 lg:p-8 space-y-6">
           <div className="border-b border-[#E6E5E0] pb-5">

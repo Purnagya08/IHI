@@ -1,164 +1,146 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { GridBackground } from '@/components/dashboard/GridBackground';
-import { MetricCard } from '@/components/dashboard/MetricCard';
 import { organizerNavigation } from '@/components/layout/navigation';
 import { getAuthSession, type UserProfile } from '@/lib/auth';
-import {
-  submissionsAPI,
-  type SubmissionRow,
-  type SubmissionStatus,
-  type SubmissionsPayload,
-} from '@/lib/api';
+import { createClient } from '@/lib/supabase/client';
 
-function formatClock(totalSeconds: number) {
-  const s = Math.max(0, totalSeconds);
-  const h = Math.floor(s / 3600)
-    .toString()
-    .padStart(2, '0');
-  const m = Math.floor((s % 3600) / 60)
-    .toString()
-    .padStart(2, '0');
-  const sec = Math.floor(s % 60)
-    .toString()
-    .padStart(2, '0');
-  return `${h}:${m}:${sec}`;
+export type SubmissionStatus = 'draft' | 'submitted' | 'locked' | 'final';
+
+export interface FormattedSubmission {
+  id: string;
+  projectName: string;
+  teamName: string;
+  track: string;
+  status: SubmissionStatus;
+  githubUrl: string | null;
+  demoUrl: string | null;
+  submittedAt: string;
+  updatedAt: string;
 }
 
-function formatWhen(iso?: string | null) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
+interface Props {
+  eventId: string;
+  initialSubmissions: FormattedSubmission[];
 }
 
-function statusStyles(status: SubmissionStatus) {
-  switch (status) {
-    case 'submitted':
-      return 'bg-emerald-50 border-emerald-200 text-emerald-700';
-    case 'draft':
-      return 'bg-amber-50 border-amber-200 text-amber-800';
-    default:
-      return 'bg-red-50 border-red-200 text-red-700';
-  }
-}
-
-function statusLabel(status: SubmissionStatus) {
-  switch (status) {
-    case 'submitted':
-      return 'Submitted';
-    case 'draft':
-      return 'Draft';
-    default:
-      return 'Missing';
-  }
-}
-
-export function SubmissionsClient({ eventId }: { eventId: string }) {
+export function SubmissionsClient({ eventId, initialSubmissions = [] }: Props) {
   const [user, setUser] = useState<UserProfile>({
     name: 'Organizer',
     email: 'organizer@platform.com',
   });
-
-  const [data, setData] = useState<SubmissionsPayload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [locking, setLocking] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'All' | SubmissionStatus>('All');
-  const [now, setNow] = useState(() => Date.now());
+  const [statusFilter, setStatusFilter] = useState<'all' | SubmissionStatus>('all');
+  const [submissions, setSubmissions] = useState<FormattedSubmission[]>(initialSubmissions);
+  const [isExporting, setIsExporting] = useState(false);
+  const [lockingId, setLockingId] = useState<string | null>(null);
+
+  const supabase = createClient();
 
   useEffect(() => {
     const session = getAuthSession();
     if (session?.name) setUser(session);
   }, []);
 
-  // Tick every second for deadline countdown
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const payload = await submissionsAPI.get(eventId);
-      setData(payload);
-    } catch (e: any) {
-      setData(null);
-      setError(e?.message || 'Could not load submissions');
-    } finally {
-      setLoading(false);
-    }
-  }, [eventId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const secondsLeft = useMemo(() => {
-    if (!data?.deadlineAt) return null;
-    const end = new Date(data.deadlineAt).getTime();
-    if (Number.isNaN(end)) return null;
-    return Math.floor((end - now) / 1000);
-  }, [data?.deadlineAt, now]);
-
-  const rows: SubmissionRow[] = data?.submissions ?? [];
-
-  const filtered = rows.filter((row) => {
-    const q = searchQuery.trim().toLowerCase();
+  const filtered = submissions.filter((s) => {
+    const q = searchQuery.toLowerCase();
     const matchesSearch =
-      !q ||
-      row.teamName.toLowerCase().includes(q) ||
-      (row.track || '').toLowerCase().includes(q) ||
-      (row.title || '').toLowerCase().includes(q);
-    const matchesStatus =
-      statusFilter === 'All' || row.status === statusFilter;
+      s.projectName.toLowerCase().includes(q) ||
+      s.teamName.toLowerCase().includes(q) ||
+      s.track.toLowerCase().includes(q);
+    const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
-  const stats = data?.stats ?? {
-    totalTeams: 0,
-    submitted: 0,
-    drafts: 0,
-    missing: 0,
+  const counts = {
+    all: submissions.length,
+    draft: submissions.filter((s) => s.status === 'draft').length,
+    submitted: submissions.filter((s) => s.status === 'submitted').length,
+    locked: submissions.filter((s) => s.status === 'locked').length,
+    final: submissions.filter((s) => s.status === 'final').length,
   };
 
-  const handleLock = async () => {
-    if (
-      !confirm(
-        'Lock submissions for this event? Participants will no longer be able to edit.'
-      )
-    ) {
-      return;
+  const handleLock = async (id: string) => {
+    const prev = [...submissions];
+    setLockingId(id);
+    setSubmissions((list) =>
+      list.map((s) => (s.id === id ? { ...s, status: 'locked' as const } : s))
+    );
+
+    const { error } = await supabase
+      .from('submissions')
+      .update({ status: 'locked', locked_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('event_id', eventId);
+
+    if (error) {
+      console.error(error);
+      setSubmissions(prev);
+      alert('Failed to lock submission. Reverted.');
+    } else {
+      await supabase.from('audit_log').insert({
+        event_id: eventId,
+        action: 'LOCK_SUBMISSION',
+        entity_type: 'submission',
+        entity_id: id,
+        payload: { status: 'locked' },
+      });
     }
-    setLocking(true);
-    try {
-      await submissionsAPI.lock(eventId);
-      await load();
-    } catch (e: any) {
-      alert(e?.message || 'Failed to lock submissions');
-    } finally {
-      setLocking(false);
+    setLockingId(null);
+  };
+
+  const handleExportCSV = () => {
+    setIsExporting(true);
+    const headers = [
+      'Submission ID',
+      'Project',
+      'Team',
+      'Track',
+      'Status',
+      'GitHub',
+      'Demo',
+      'Submitted At',
+    ];
+    const rows = submissions.map((s) =>
+      [
+        s.id,
+        `"${s.projectName}"`,
+        `"${s.teamName}"`,
+        `"${s.track}"`,
+        s.status,
+        s.githubUrl || '',
+        s.demoUrl || '',
+        `"${s.submittedAt}"`,
+      ].join(',')
+    );
+    const blob = new Blob([[headers.join(','), ...rows].join('\n')], {
+      type: 'text/csv;charset=utf-8;',
+    });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `submissions_${eventId}.csv`;
+    link.click();
+    setIsExporting(false);
+  };
+
+  const statusStyles = (status: SubmissionStatus) => {
+    switch (status) {
+      case 'submitted':
+        return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+      case 'locked':
+        return 'bg-[#0A0A0A] border-[#0A0A0A] text-[#C6A24A]';
+      case 'final':
+        return 'bg-blue-50 border-blue-200 text-blue-700';
+      case 'draft':
+      default:
+        return 'bg-amber-50 border-amber-200 text-amber-800';
     }
   };
 
-  const openRepo = (url?: string | null) => {
-    if (!url) return;
-    const href = url.startsWith('http') ? url : `https://${url}`;
-    window.open(href, '_blank', 'noopener,noreferrer');
-  };
+  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
   return (
     <div className="relative min-h-screen bg-[#F9F9F6]">
@@ -168,7 +150,7 @@ export function SubmissionsClient({ eventId }: { eventId: string }) {
         role="organizer"
         userName={user.name}
         userEmail={user.email}
-        eventName={user.eventName || 'Event Console'}
+        eventName={user.eventName || 'Live Event Console'}
         navigation={organizerNavigation}
       >
         <div className="relative z-10 mx-auto max-w-7xl p-4 md:p-6 lg:p-8 space-y-6">
@@ -182,96 +164,20 @@ export function SubmissionsClient({ eventId }: { eventId: string }) {
                 Submissions
               </h1>
               <p className="text-xs text-[#706F6B] mt-1 font-sans">
-                Live project pipeline — data from participant submissions.
+                Review project submissions, lock entries, and export the pipeline.
               </p>
             </div>
 
-            <div className="flex items-center gap-3 flex-wrap">
-              {secondsLeft !== null && (
-                <div
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border shadow-sm ${
-                    secondsLeft <= 0
-                      ? 'border-[#E6E5E0] bg-[#FAF9F5] text-[#706F6B]'
-                      : 'border-red-200 bg-red-50 text-red-700'
-                  }`}
-                >
-                  {secondsLeft > 0 && (
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600" />
-                    </span>
-                  )}
-                  <span className="font-mono text-sm font-bold tracking-tight">
-                    {secondsLeft <= 0 ? '00:00:00' : formatClock(secondsLeft)}
-                  </span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider opacity-80">
-                    {secondsLeft <= 0 ? 'Closed' : 'Remaining'}
-                  </span>
-                </div>
-              )}
-
-              <button
-                onClick={() => load()}
-                disabled={loading}
-                className="px-3.5 py-1.5 rounded-lg border border-[#E6E5E0] bg-white hover:bg-[#FAF9F5] text-xs font-mono font-bold text-[#0A0A0A] transition-all disabled:opacity-50"
-              >
-                {loading ? 'Refreshing…' : 'Refresh'}
-              </button>
-
-              <button
-                onClick={handleLock}
-                disabled={locking || loading}
-                className="px-3.5 py-1.5 rounded-lg border border-[#E6E5E0] bg-[#0A0A0A] hover:bg-[#C6A24A] text-white text-xs font-mono font-bold transition-all shadow-sm disabled:opacity-50"
-              >
-                {locking ? 'Locking…' : 'Lock Submissions'}
-              </button>
-            </div>
+            <button
+              onClick={handleExportCSV}
+              disabled={isExporting || submissions.length === 0}
+              className="px-3.5 py-1.5 rounded-lg border border-[#E6E5E0] bg-[#0A0A0A] hover:bg-[#C6A24A] text-white text-xs font-mono font-bold transition-all shadow-sm disabled:opacity-70 disabled:hover:bg-[#0A0A0A]"
+            >
+              {isExporting ? 'Exporting...' : 'Export CSV'}
+            </button>
           </div>
 
-          {/* Error banner */}
-          {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 font-mono">
-              <strong className="font-bold">Could not load live data:</strong>{' '}
-              {error}
-              <button
-                onClick={() => load()}
-                className="ml-3 underline font-bold hover:text-red-950"
-              >
-                Retry
-              </button>
-            </div>
-          )}
-
-          {/* Metrics — real stats only */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard
-              label="Total Teams"
-              value={loading && !data ? '—' : String(stats.totalTeams)}
-              accent="neutral"
-            />
-            <MetricCard
-              label="Final Submitted"
-              value={loading && !data ? '—' : String(stats.submitted)}
-              accent="success"
-              helper={
-                stats.totalTeams
-                  ? `${Math.round((stats.submitted / stats.totalTeams) * 100)}% of teams`
-                  : undefined
-              }
-            />
-            <MetricCard
-              label="Drafts Saved"
-              value={loading && !data ? '—' : String(stats.drafts)}
-              accent="warning"
-            />
-            <MetricCard
-              label="Missing"
-              value={loading && !data ? '—' : String(stats.missing)}
-              accent="critical"
-            />
-          </div>
-
-          {/* Filters */}
+          {/* Controls */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-4 rounded-xl border border-[#E6E5E0] shadow-sm">
             <div className="relative w-full sm:w-80">
               <svg
@@ -282,24 +188,19 @@ export function SubmissionsClient({ eventId }: { eventId: string }) {
                 fill="none"
               >
                 <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
-                <path
-                  d="M14 14l-3-3"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
+                <path d="M14 14l-3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
               <input
                 type="text"
-                placeholder="Search team, track, or title…"
+                placeholder="Search project, team, or track..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 rounded-lg border border-[#E6E5E0] bg-[#FAF9F5] text-xs text-[#0A0A0A] placeholder:text-[#706F6B] focus:outline-none focus:border-[#C6A24A] transition-colors"
               />
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
-              {(['All', 'submitted', 'draft', 'missing'] as const).map((status) => (
+            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto hide-scrollbar">
+              {(['all', 'draft', 'submitted', 'locked', 'final'] as const).map((status) => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
@@ -309,7 +210,8 @@ export function SubmissionsClient({ eventId }: { eventId: string }) {
                       : 'bg-white border border-[#E6E5E0] text-[#706F6B] hover:border-[#C6A24A]/50 hover:text-[#0A0A0A]'
                   }`}
                 >
-                  {status === 'All' ? 'All' : statusLabel(status)}
+                  {capitalize(status)}
+                  <span className="ml-1.5 opacity-60">{counts[status]}</span>
                 </button>
               ))}
             </div>
@@ -322,16 +224,16 @@ export function SubmissionsClient({ eventId }: { eventId: string }) {
                 <thead>
                   <tr className="border-b border-[#F0EFEA] bg-[#FAF9F5]">
                     <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B]">
-                      Team
+                      Project / Team
+                    </th>
+                    <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B]">
+                      Links
                     </th>
                     <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B]">
                       Status
                     </th>
                     <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B]">
-                      Repo
-                    </th>
-                    <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B]">
-                      Last saved
+                      Submitted
                     </th>
                     <th className="px-5 py-3 text-[10px] font-mono font-bold uppercase tracking-widest text-[#706F6B] text-right">
                       Actions
@@ -339,105 +241,139 @@ export function SubmissionsClient({ eventId }: { eventId: string }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F0EFEA]">
-                  {loading && !data ? (
-                    <tr>
-                      <td colSpan={5} className="px-5 py-16 text-center">
-                        <p className="font-mono text-xs text-[#706F6B]">
-                          Loading live submissions…
-                        </p>
-                      </td>
-                    </tr>
-                  ) : (
-                    <AnimatePresence>
-                      {filtered.length > 0 ? (
-                        filtered.map((row, i) => (
-                          <motion.tr
-                            key={row.id}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.15, delay: i * 0.03 }}
-                            className="group hover:bg-[#FAF9F5] transition-colors"
-                          >
-                            <td className="px-5 py-4">
-                              <p className="font-serif font-bold text-sm text-[#0A0A0A] group-hover:text-[#C6A24A] transition-colors">
-                                {row.teamName}
-                              </p>
-                              <p className="font-mono text-[9px] text-[#706F6B] mt-0.5">
-                                {[row.track, row.title].filter(Boolean).join(' · ') ||
-                                  '—'}
-                              </p>
-                            </td>
-                            <td className="px-5 py-4">
-                              <span
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${statusStyles(
-                                  row.status
-                                )}`}
-                              >
-                                {statusLabel(row.status)}
-                              </span>
-                            </td>
-                            <td className="px-5 py-4">
-                              {row.repoUrl ? (
-                                <button
-                                  onClick={() => openRepo(row.repoUrl)}
-                                  className="inline-flex items-center gap-1 text-[11px] font-mono text-[#0A0A0A] hover:text-[#C6A24A] underline decoration-[#E6E5E0] underline-offset-4"
+                  <AnimatePresence>
+                    {filtered.length > 0 ? (
+                      filtered.map((sub, i) => (
+                        <motion.tr
+                          key={sub.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.98 }}
+                          transition={{ duration: 0.2, delay: i * 0.02 }}
+                          className="group hover:bg-[#FAF9F5] transition-colors"
+                        >
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="h-9 w-9 rounded-lg bg-[#0A0A0A] text-[#C6A24A] flex items-center justify-center font-serif font-bold text-sm shadow-sm">
+                                {sub.projectName.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-serif font-bold text-sm text-[#0A0A0A] group-hover:text-[#C6A24A] transition-colors">
+                                  {sub.projectName}
+                                </p>
+                                <p className="font-sans text-[11px] text-[#706F6B]">{sub.teamName}</p>
+                                <p className="font-mono text-[9px] text-[#A07F32] mt-0.5">{sub.track}</p>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="flex flex-col gap-1">
+                              {sub.githubUrl ? (
+                                <a
+                                  href={sub.githubUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-mono text-[10px] text-[#0A0A0A] hover:text-[#C6A24A] underline-offset-2 hover:underline truncate max-w-[180px]"
                                 >
-                                  View Repo
-                                </button>
+                                  GitHub ↗
+                                </a>
                               ) : (
-                                <span className="text-[11px] font-mono text-[#706F6B]">
-                                  —
-                                </span>
+                                <span className="font-mono text-[10px] text-[#706F6B]">No repo</span>
                               )}
-                            </td>
-                            <td className="px-5 py-4 font-mono text-[10px] text-[#706F6B]">
-                              {formatWhen(row.lastSavedAt || row.submittedAt)}
-                            </td>
-                            <td className="px-5 py-4 text-right">
-                              <button
-                                disabled={row.status === 'missing'}
-                                onClick={() => openRepo(row.demoUrl || row.repoUrl)}
-                                className="px-3 py-1.5 rounded border border-[#E6E5E0] bg-white text-[10px] font-mono font-bold text-[#0A0A0A] hover:bg-[#FAF9F5] shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                              >
-                                View project
-                              </button>
-                            </td>
-                          </motion.tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5}>
-                            <div className="py-16 flex flex-col items-center justify-center text-center">
-                              <h3 className="font-serif text-lg font-bold text-[#0A0A0A]">
-                                {error
-                                  ? 'No live data'
-                                  : rows.length === 0
-                                  ? 'No submissions yet'
-                                  : 'No matches'}
-                              </h3>
-                              <p className="text-xs text-[#706F6B] mt-1 max-w-sm">
-                                {rows.length === 0 && !error
-                                  ? 'When participants submit projects, they will appear here automatically.'
-                                  : 'Try clearing filters or refreshing.'}
-                              </p>
-                              {(searchQuery || statusFilter !== 'All') && (
-                                <button
-                                  onClick={() => {
-                                    setSearchQuery('');
-                                    setStatusFilter('All');
-                                  }}
-                                  className="mt-4 px-3 py-1.5 rounded bg-[#FAF9F5] border border-[#E6E5E0] text-[10px] font-mono font-bold"
+                              {sub.demoUrl ? (
+                                <a
+                                  href={sub.demoUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-mono text-[10px] text-[#0A0A0A] hover:text-[#C6A24A] underline-offset-2 hover:underline truncate max-w-[180px]"
                                 >
-                                  Clear filters
-                                </button>
+                                  Demo ↗
+                                </a>
+                              ) : (
+                                <span className="font-mono text-[10px] text-[#706F6B]">No demo</span>
                               )}
                             </div>
                           </td>
-                        </tr>
-                      )}
-                    </AnimatePresence>
-                  )}
+
+                          <td className="px-5 py-4">
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${statusStyles(
+                                sub.status
+                              )}`}
+                            >
+                              {sub.status === 'draft' && (
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                              )}
+                              {capitalize(sub.status)}
+                            </span>
+                          </td>
+
+                          <td className="px-5 py-4 font-mono text-[10px] text-[#706F6B]">
+                            {sub.submittedAt}
+                          </td>
+
+                          <td className="px-5 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {sub.status === 'submitted' && (
+                                <button
+                                  onClick={() => handleLock(sub.id)}
+                                  disabled={lockingId === sub.id}
+                                  className="px-2.5 py-1 rounded border border-[#E6E5E0] bg-[#0A0A0A] text-[10px] font-mono font-bold text-white hover:bg-[#C6A24A] disabled:opacity-60"
+                                >
+                                  {lockingId === sub.id ? 'Locking…' : 'Lock'}
+                                </button>
+                              )}
+                              <button className="px-2 py-1 rounded border border-[#E6E5E0] bg-white text-[10px] font-mono font-bold text-[#0A0A0A] hover:bg-[#FAF9F5] shadow-sm">
+                                View
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5}>
+                          <div className="py-24 flex flex-col items-center justify-center text-center">
+                            <div className="h-16 w-16 rounded-full border-2 border-dashed border-[#E6E5E0] bg-white flex items-center justify-center mb-4 text-[#C6A24A]">
+                              <svg
+                                width="24"
+                                height="24"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                              >
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="16" y1="13" x2="8" y2="13" />
+                                <line x1="16" y1="17" x2="8" y2="17" />
+                              </svg>
+                            </div>
+                            <h3 className="font-serif text-xl font-bold text-[#0A0A0A]">
+                              No submissions yet
+                            </h3>
+                            <p className="text-sm text-[#706F6B] mt-2 max-w-sm">
+                              {submissions.length === 0
+                                ? 'When teams submit projects, they will appear here in real time.'
+                                : 'No submissions match your current filter or search.'}
+                            </p>
+                            {submissions.length > 0 && (
+                              <button
+                                onClick={() => {
+                                  setSearchQuery('');
+                                  setStatusFilter('all');
+                                }}
+                                className="mt-6 px-4 py-2 rounded-lg bg-[#0A0A0A] text-xs font-mono font-bold text-white hover:bg-[#C6A24A] transition-all"
+                              >
+                                Clear All Filters
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </AnimatePresence>
                 </tbody>
               </table>
             </div>
